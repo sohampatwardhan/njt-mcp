@@ -1,0 +1,225 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Tag matches Cargo.toml and npm versions
+        id: version
+        run: |
+          bash scripts/check-versions.sh
+          version=$(sed -n 's/^version = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"$/\1/p' Cargo.toml | head -n 1)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Reject PDFs and tracked secret files
+        run: bash .github/scripts/check-repo.sh
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings -D clippy::missing_docs_in_private_items
+      - name: Test
+        run: cargo test --locked
+      - name: Rustdoc
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items --locked
+      - name: Check the npm launcher parses
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: |
+          node --check npm/njt-mcp/bin/njt-mcp.js
+          node --test npm/njt-mcp/test/release.test.js
+      - name: cargo publish dry run
+        run: cargo publish --dry-run --locked
+
+  crates:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # crates.io rejects clients with no User-Agent (HTTP 403). The script
+      # asks for this exact version, then the sparse index.
+      - name: See if this version is already on crates.io
+        id: check
+        run: |
+          if bash scripts/publish-crate.sh --check-only; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      # The token is minted for this job and revoked when the job ends.
+      # It is not a repository secret.
+      - name: Authenticate to crates.io
+        if: steps.check.outputs.published != 'true'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+      - name: Publish to crates.io
+        if: steps.check.outputs.published != 'true'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: bash scripts/publish-crate.sh
+
+  binaries:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            artifact: bin-linux-x64
+            binary: njt-mcp
+            linker: musl-gcc
+            archive: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            artifact: bin-linux-arm64
+            binary: njt-mcp
+            linker: musl-gcc
+            archive: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: bin-darwin-x64
+            binary: njt-mcp
+            linker: ""
+            archive: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: bin-darwin-arm64
+            binary: njt-mcp
+            linker: ""
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: bin-win32-x64
+            binary: njt-mcp.exe
+            linker: ""
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install musl tools
+        if: matrix.linker != ''
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: macOS x86_64 SDK
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "CFLAGS_x86_64_apple_darwin=-arch x86_64" >> "$GITHUB_ENV"
+      - name: Build musl
+        if: matrix.linker != ''
+        env:
+          CC: ${{ matrix.linker }}
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.linker }}
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: ${{ matrix.linker }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Build
+        if: matrix.linker == ''
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package archive
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          src="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          cp "$src" "dist/${{ matrix.binary }}"
+          tar -C dist -czf "dist/njt-mcp-${{ matrix.target }}.tar.gz" "${{ matrix.binary }}"
+      - name: Package zip
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/${{ matrix.binary }}"
+          Compress-Archive -Path "dist/${{ matrix.binary }}" -DestinationPath "dist/njt-mcp-${{ matrix.target }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.binary }}
+            dist/njt-mcp-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  github-release:
+    needs: [verify, binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: artifacts
+      - name: Checksums and release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
+          cp scripts/install.sh release/njt-mcp-installer.sh
+          cp scripts/install.ps1 release/njt-mcp-installer.ps1
+          chmod 755 release/njt-mcp-installer.sh
+          (
+            cd release
+            sha256sum njt-mcp-*.tar.gz njt-mcp-*.zip > sha256sums.txt
+          )
+          tag="v${VERSION}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "njt-mcp ${tag}" --notes "Prebuilt binaries, checksums, and installers for njt-mcp ${tag}. See CHANGELOG.md."
+          fi
+          existing=$(gh release view "$tag" --json assets --jq '.assets[].name')
+          for file in release/*; do
+            name=$(basename "$file")
+            if printf '%s\n' "$existing" | grep -Fxq "$name"; then
+              echo "release asset ${name} already exists"
+            else
+              gh release upload "$tag" "$file"
+            fi
+          done
+
+  npm:
+    needs: [verify, github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      # Do not set registry-url. actions/setup-node@v4 then writes always-auth
+      # and a placeholder NODE_AUTH_TOKEN, which hides npmjs.org trusted publishing.
+      # Publish only after github-release has uploaded the archives the launcher downloads.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Publish njt-mcp to npmjs.org when this version is new
+        run: bash scripts/publish-npm.sh
+      - name: Publish @sohampatwardhan/njt-mcp to GitHub Packages when this version is new
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-github-packages.sh

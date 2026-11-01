@@ -7,6 +7,18 @@ rust-version = "1.88"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/sohampatwardhan/njt-mcp"
+keywords = ["njt", "nj-transit", "mcp", "transit", "gtfs"]
+categories = ["command-line-utilities"]
+include = [
+    "/src/**",
+    "/proto/**",
+    "/build.rs",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -54,6 +66,7 @@ wiremock = "0.6"
 
 [build-dependencies]
 prost-build = "0.14"
+protoc-bin-vendored = "3.3.0"
 
 [profile.release]
 lto = "thin"
