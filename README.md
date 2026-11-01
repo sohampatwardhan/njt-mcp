@@ -6,12 +6,12 @@ NJ Transit data terms apply to anything this server returns. Register at <https:
 
 ## Why Rust
 
-The server is a long-running agent tool, same shape as [`gtfs-rt-mcp`](https://github.com/sohampatwardhan/gtfs-mcp):
+The server is a long-running agent tool, same shape as [`gtfs-mcp`](https://github.com/sohampatwardhan/gtfs-mcp) ([npm `gtfs-mcp` 0.3.0](https://www.npmjs.com/package/gtfs-mcp)):
 
 - `rmcp` speaks stdio and streamable HTTP.
 - `prost` decodes the vendored GTFS-Realtime schema.
 - One static binary. Release builds use thin LTO, `opt-level = "z"`, and stripped symbols.
-- `gtfs-rt-mcp` keeps its GTFS parser private, so this crate vendors the same protobuf and parses the few static files the tools need (stops, routes, trips, stop times, and `trips_internal.txt` when the bus zip has it).
+- `gtfs-mcp` keeps its GTFS parser private, so this crate vendors the same protobuf and parses the few static files the tools need (stops, routes, trips, stop times, and `trips_internal.txt` when the bus zip has it).
 
 ## Architecture
 
@@ -38,6 +38,173 @@ cargo build --release --locked
 ```
 
 macOS: `brew install protobuf`, then the same `cargo build`.
+
+## Install as an MCP server
+
+`njt-mcp` is not published to crates.io or npm. `cargo install njt-mcp` and `npx njt-mcp` do not work. Install the binary from this git repository, or build it from a clone. Either way you need Rust 1.88 or newer and `protoc` (`protobuf-compiler` on Debian and Ubuntu, `brew install protobuf` on macOS), because the GTFS-Realtime schema is compiled at build time.
+
+From git, into `~/.cargo/bin` (put that directory on `PATH`):
+
+```bash
+cargo install --git https://github.com/sohampatwardhan/njt-mcp --locked --bin njt-mcp
+njt-mcp --version
+```
+
+`--locked` uses the `Cargo.lock` in the repository. `--bin njt-mcp` is the only binary. The default branch is `main`.
+
+From a clone, the release binary is `target/release/njt-mcp`. You can copy it onto `PATH` or pass that path as `command`:
+
+```bash
+git clone https://github.com/sohampatwardhan/njt-mcp
+cd njt-mcp
+cargo build --release --locked
+./target/release/njt-mcp --version
+```
+
+The client must run `njt-mcp stdio`. `stdio` speaks MCP on stdin and stdout. `http` serves streamable HTTP at `/mcp` (default `127.0.0.1:8092`) and is not what these stdio configs start. Credentials are environment variables only. `replace-me` below is a placeholder. Do not commit a real username, password, or token.
+
+Use one credential form. Username and password:
+
+```bash
+NJT_USERNAME=replace-me
+NJT_PASSWORD=replace-me
+```
+
+Or a pre-minted token. That process cannot refresh it when NJ Transit rejects it:
+
+```bash
+NJT_TOKEN=replace-me
+```
+
+### Claude Desktop and Cursor
+
+Both use an `mcpServers` object. Cursor reads `.cursor/mcp.json` in the project (or the user MCP config). Claude Desktop reads `claude_desktop_config.json`.
+
+```json
+{
+  "mcpServers": {
+    "njt": {
+      "command": "njt-mcp",
+      "args": ["stdio"],
+      "env": {
+        "NJT_USERNAME": "replace-me",
+        "NJT_PASSWORD": "replace-me"
+      }
+    }
+  }
+}
+```
+
+Token-only, same files:
+
+```json
+{
+  "mcpServers": {
+    "njt": {
+      "command": "njt-mcp",
+      "args": ["stdio"],
+      "env": {
+        "NJT_TOKEN": "replace-me"
+      }
+    }
+  }
+}
+```
+
+Cursor can also attach to streamable HTTP after you start `njt-mcp http` yourself, with the credentials in that process:
+
+```json
+{
+  "mcpServers": {
+    "njt": {
+      "url": "http://127.0.0.1:8092/mcp"
+    }
+  }
+}
+```
+
+### VS Code
+
+Workspace file `.vscode/mcp.json`. The top-level key is `servers`, and a local process sets `"type": "stdio"`.
+
+```json
+{
+  "servers": {
+    "njt": {
+      "type": "stdio",
+      "command": "njt-mcp",
+      "args": ["stdio"],
+      "env": {
+        "NJT_USERNAME": "replace-me",
+        "NJT_PASSWORD": "replace-me"
+      }
+    }
+  }
+}
+```
+
+Token-only:
+
+```json
+{
+  "servers": {
+    "njt": {
+      "type": "stdio",
+      "command": "njt-mcp",
+      "args": ["stdio"],
+      "env": {
+        "NJT_TOKEN": "replace-me"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+`claude mcp add` registers a stdio server. Stdio is the default transport. `-e` is the short form of `--env`. The server name comes before `-e`, and everything after `--` is the process Claude Code runs. That process is `njt-mcp stdio`.
+
+```bash
+claude mcp add njt \
+  -e NJT_USERNAME=replace-me \
+  -e NJT_PASSWORD=replace-me \
+  -- njt-mcp stdio
+```
+
+Token-only:
+
+```bash
+claude mcp add njt -e NJT_TOKEN=replace-me -- njt-mcp stdio
+```
+
+`--env` is the same flag as `-e`. Do not put the server name immediately after `--env`, or Claude Code treats the name as another variable. The command above avoids that by putting `njt` first.
+
+### Codex
+
+User config `~/.codex/config.toml`. The table is `mcp_servers`, and `args` must include the `stdio` subcommand.
+
+```toml
+[mcp_servers.njt]
+command = "njt-mcp"
+args = ["stdio"]
+
+[mcp_servers.njt.env]
+NJT_USERNAME = "replace-me"
+NJT_PASSWORD = "replace-me"
+```
+
+Token-only, same file:
+
+```toml
+[mcp_servers.njt]
+command = "njt-mcp"
+args = ["stdio"]
+
+[mcp_servers.njt.env]
+NJT_TOKEN = "replace-me"
+```
+
+The server name on `initialize` is `njt-mcp`. Responses are compact JSON. Page with `offset` until `next_offset` is null.
 
 ## Run
 
@@ -125,58 +292,7 @@ docker run --rm -p 8092:8092 \
   njt-mcp
 ```
 
-The runtime image is `debian:bookworm-slim` plus CA certificates, uid 10001. Inside the container the process listens on `0.0.0.0:8092`. Mount a volume on the cache path if you want tokens to survive container restarts. Give that volume to uid 10001.
-
-## MCP clients
-
-Put the binary on `PATH`, or use an absolute `command`. `args` must include `stdio`.
-
-Cursor `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "njt": {
-      "command": "njt-mcp",
-      "args": ["stdio"],
-      "env": {
-        "NJT_USERNAME": "replace-me",
-        "NJT_PASSWORD": "replace-me"
-      }
-    }
-  }
-}
-```
-
-Claude Desktop `claude_desktop_config.json` and Claude Code `.mcp.json` use the same `mcpServers` object. A token-only process:
-
-```json
-{
-  "mcpServers": {
-    "njt": {
-      "command": "njt-mcp",
-      "args": ["stdio"],
-      "env": {
-        "NJT_TOKEN": "replace-me"
-      }
-    }
-  }
-}
-```
-
-Cursor streamable HTTP, after `njt-mcp http` is running with credentials in that process:
-
-```json
-{
-  "mcpServers": {
-    "njt": {
-      "url": "http://127.0.0.1:8092/mcp"
-    }
-  }
-}
-```
-
-The server name is `njt-mcp`. Responses are compact JSON. Page with `offset` until `next_offset` is null.
+The runtime image is `debian:bookworm-slim` plus CA certificates, uid 10001. Inside the container the process listens on `0.0.0.0:8092`. Mount a volume on the cache path if you want tokens to survive container restarts. Give that volume to uid 10001. Client configs that start `njt-mcp stdio` are in [Install as an MCP server](#install-as-an-mcp-server).
 
 ## Tools
 
