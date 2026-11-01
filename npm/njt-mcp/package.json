@@ -1,0 +1,22 @@
+{
+  "name": "njt-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for NJ Transit rail, bus, and light rail data",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sohampatwardhan/njt-mcp"
+  },
+  "homepage": "https://github.com/sohampatwardhan/njt-mcp#readme",
+  "bin": {
+    "njt-mcp": "bin/njt-mcp.js"
+  },
+  "files": [
+    "bin/njt-mcp.js",
+    "lib/release.js",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

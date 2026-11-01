@@ -5,3 +5,4 @@
 *.log
 /out
 .njt-mcp-cache
+node_modules

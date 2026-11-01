@@ -1,5 +1,0 @@
-target
-.git
-*.log
-.env
-agent-tools

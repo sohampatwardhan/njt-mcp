@@ -26,66 +26,49 @@ flowchart LR
 
 Login is single-flight and cached. Live responses sit in memory for `NJT_RT_TTL` seconds (default 30). `rail_schedule` is stored on disk and fetched at most once per station per America/New_York day.
 
-## Build
-
-Rust 1.88 or newer. `protoc` is required at build time. The schema is vendored in `proto/gtfs-realtime.proto` (Apache-2.0). `cargo test` does not download NJ Transit data.
-
-```bash
-sudo apt-get update
-sudo apt-get install -y build-essential protobuf-compiler pkg-config
-cargo build --release --locked
-./target/release/njt-mcp --version
-```
-
-macOS: `brew install protobuf`, then the same `cargo build`.
-
 ## Install as an MCP server
 
-`njt-mcp` is not published to crates.io or npm. `cargo install njt-mcp` and `npx njt-mcp` do not work. Install the binary from this git repository, or build it from a clone. Either way you need Rust 1.88 or newer and `protoc` (`protobuf-compiler` on Debian and Ubuntu, `brew install protobuf` on macOS), because the GTFS-Realtime schema is compiled at build time.
-
-From git, into `~/.cargo/bin` (put that directory on `PATH`):
+After 0.1.0 is published, the usual install is the npm launcher. It has no install scripts. The first run downloads the matching GitHub Release archive, checks `sha256sums.txt`, caches the binary, and runs it. `npx -y njt-mcp` with no subcommand exits. `stdio` is the MCP transport.
 
 ```bash
-cargo install --git https://github.com/sohampatwardhan/njt-mcp --locked --bin njt-mcp
-njt-mcp --version
+npx -y njt-mcp --version
+NJT_USERNAME=replace-me NJT_PASSWORD=replace-me npx -y njt-mcp stdio
 ```
 
-`--locked` uses the `Cargo.lock` in the repository. `--bin njt-mcp` is the only binary. The default branch is `main`.
+`NJT_MCP_BINARY` points at a local binary and skips the download. `HTTPS_PROXY` (or `https_proxy`, then `HTTP_PROXY`) is used when set. `NO_PROXY` skips the proxy for matching hosts.
 
-From a clone, the release binary is `target/release/njt-mcp`. You can copy it onto `PATH` or pass that path as `command`:
+The same launcher is also `@sohampatwardhan/njt-mcp` on GitHub Packages. npmjs.org `njt-mcp` is the usual install.
+
+From crates.io, once the crate exists:
 
 ```bash
-git clone https://github.com/sohampatwardhan/njt-mcp
-cd njt-mcp
-cargo build --release --locked
-./target/release/njt-mcp --version
+cargo install njt-mcp --locked
 ```
 
-The client must run `njt-mcp stdio`. `stdio` speaks MCP on stdin and stdout. `http` serves streamable HTTP at `/mcp` (default `127.0.0.1:8092`) and is not what these stdio configs start. Credentials are environment variables only. `replace-me` below is a placeholder. Do not commit a real username, password, or token.
+Prebuilt archives, checksums, and installers are attached to [GitHub Releases](https://github.com/sohampatwardhan/njt-mcp/releases):
 
-Use one credential form. Username and password:
+| Archive | Platform |
+| --- | --- |
+| `njt-mcp-x86_64-unknown-linux-musl.tar.gz` | Linux x64, static musl |
+| `njt-mcp-aarch64-unknown-linux-musl.tar.gz` | Linux arm64, static musl |
+| `njt-mcp-aarch64-apple-darwin.tar.gz` | macOS arm64 |
+| `njt-mcp-x86_64-apple-darwin.tar.gz` | macOS x64 |
+| `njt-mcp-x86_64-pc-windows-msvc.zip` | Windows x64 |
 
-```bash
-NJT_USERNAME=replace-me
-NJT_PASSWORD=replace-me
-```
+`scripts/install.sh` and `scripts/install.ps1` download one of those archives and check `sha256sums.txt`. `NJT_MCP_VERSION=0.1.0` selects a release. Unset uses the latest release.
 
-Or a pre-minted token. That process cannot refresh it when NJ Transit rejects it:
-
-```bash
-NJT_TOKEN=replace-me
-```
+Credentials are environment variables only. There are no username, password, or token flags. `replace-me` is a placeholder. Do not commit a real credential. Use `NJT_USERNAME` and `NJT_PASSWORD`, or `NJT_TOKEN` alone. A token-only process cannot mint a replacement when NJ Transit rejects the token.
 
 ### Claude Desktop and Cursor
 
-Both use an `mcpServers` object. Cursor reads `.cursor/mcp.json` in the project (or the user MCP config). Claude Desktop reads `claude_desktop_config.json`.
+Claude Desktop reads `claude_desktop_config.json` (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows). Cursor reads `.cursor/mcp.json` or `~/.cursor/mcp.json`. Both use `mcpServers`.
 
 ```json
 {
   "mcpServers": {
-    "njt": {
-      "command": "njt-mcp",
-      "args": ["stdio"],
+    "njt-mcp": {
+      "command": "npx",
+      "args": ["-y", "njt-mcp", "stdio"],
       "env": {
         "NJT_USERNAME": "replace-me",
         "NJT_PASSWORD": "replace-me"
@@ -100,9 +83,9 @@ Token-only, same files:
 ```json
 {
   "mcpServers": {
-    "njt": {
-      "command": "njt-mcp",
-      "args": ["stdio"],
+    "njt-mcp": {
+      "command": "npx",
+      "args": ["-y", "njt-mcp", "stdio"],
       "env": {
         "NJT_TOKEN": "replace-me"
       }
@@ -111,29 +94,17 @@ Token-only, same files:
 }
 ```
 
-Cursor can also attach to streamable HTTP after you start `njt-mcp http` yourself, with the credentials in that process:
-
-```json
-{
-  "mcpServers": {
-    "njt": {
-      "url": "http://127.0.0.1:8092/mcp"
-    }
-  }
-}
-```
-
 ### VS Code
 
-Workspace file `.vscode/mcp.json`. The top-level key is `servers`, and a local process sets `"type": "stdio"`.
+`.vscode/mcp.json` uses `servers` and `"type": "stdio"`:
 
 ```json
 {
   "servers": {
-    "njt": {
+    "njt-mcp": {
       "type": "stdio",
-      "command": "njt-mcp",
-      "args": ["stdio"],
+      "command": "npx",
+      "args": ["-y", "njt-mcp", "stdio"],
       "env": {
         "NJT_USERNAME": "replace-me",
         "NJT_PASSWORD": "replace-me"
@@ -143,78 +114,70 @@ Workspace file `.vscode/mcp.json`. The top-level key is `servers`, and a local p
 }
 ```
 
-Token-only:
-
-```json
-{
-  "servers": {
-    "njt": {
-      "type": "stdio",
-      "command": "njt-mcp",
-      "args": ["stdio"],
-      "env": {
-        "NJT_TOKEN": "replace-me"
-      }
-    }
-  }
-}
-```
-
 ### Claude Code
 
-`claude mcp add` registers a stdio server. Stdio is the default transport. `-e` is the short form of `--env`. The server name comes before `-e`, and everything after `--` is the process Claude Code runs. That process is `njt-mcp stdio`.
+`-e` is `--env`. The name comes before `-e`. Everything after `--` is the process, which is `npx -y njt-mcp stdio`.
 
 ```bash
-claude mcp add njt \
+claude mcp add njt-mcp \
   -e NJT_USERNAME=replace-me \
   -e NJT_PASSWORD=replace-me \
-  -- njt-mcp stdio
+  -- npx -y njt-mcp stdio
 ```
-
-Token-only:
 
 ```bash
-claude mcp add njt -e NJT_TOKEN=replace-me -- njt-mcp stdio
+claude mcp add njt-mcp -e NJT_TOKEN=replace-me -- npx -y njt-mcp stdio
 ```
-
-`--env` is the same flag as `-e`. Do not put the server name immediately after `--env`, or Claude Code treats the name as another variable. The command above avoids that by putting `njt` first.
 
 ### Codex
 
-User config `~/.codex/config.toml`. The table is `mcp_servers`, and `args` must include the `stdio` subcommand.
+`~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.njt]
-command = "njt-mcp"
-args = ["stdio"]
+[mcp_servers.njt-mcp]
+command = "npx"
+args = ["-y", "njt-mcp", "stdio"]
 
-[mcp_servers.njt.env]
+[mcp_servers.njt-mcp.env]
 NJT_USERNAME = "replace-me"
 NJT_PASSWORD = "replace-me"
 ```
 
-Token-only, same file:
+Token-only, replace the env table with `NJT_TOKEN = "replace-me"`.
 
-```toml
-[mcp_servers.njt]
-command = "njt-mcp"
-args = ["stdio"]
+### Streamable HTTP
 
-[mcp_servers.njt.env]
-NJT_TOKEN = "replace-me"
+`http` listens on `127.0.0.1:8092`. MCP is `http://127.0.0.1:8092/mcp`. Liveness is `GET /healthz`. Put the credential variables on that process. `Host` must be `localhost`, `127.0.0.1`, or `::1` unless you pass `--allowed-host`.
+
+```bash
+NJT_USERNAME=replace-me NJT_PASSWORD=replace-me npx -y njt-mcp http
 ```
 
-The server name on `initialize` is `njt-mcp`. Responses are compact JSON. Page with `offset` until `next_offset` is null.
+## Build from source
+
+Rust 1.88 or newer. The GTFS-Realtime schema is vendored in `proto/gtfs-realtime.proto` (Apache-2.0) and compiled with a vendored `protoc`, so a system protobuf compiler is not required. `cargo test` does not call NJ Transit.
+
+```bash
+git clone https://github.com/sohampatwardhan/njt-mcp
+cd njt-mcp
+cargo build --release --locked
+./target/release/njt-mcp --version
+```
+
+`cargo install --path . --locked` installs that binary. `NJT_MCP_BINARY=./target/release/njt-mcp npx -y njt-mcp stdio` uses it without downloading a release.
 
 ## Run
 
 Logs go to stderr. stdio mode does not write logs to stdout.
 
 ```bash
-NJT_USERNAME=replace-me NJT_PASSWORD=replace-me njt-mcp stdio
+NJT_USERNAME=replace-me NJT_PASSWORD=replace-me npx -y njt-mcp stdio
 
 # Pre-minted token. This process cannot refresh it.
-NJT_TOKEN=replace-me njt-mcp stdio
+NJT_TOKEN=replace-me npx -y njt-mcp stdio
+
+# The same subcommands after cargo install, or with a release binary on PATH.
+NJT_USERNAME=replace-me NJT_PASSWORD=replace-me njt-mcp stdio
 
 # Streamable HTTP on 127.0.0.1:8092. MCP at /mcp, liveness at /healthz.
 NJT_USERNAME=replace-me NJT_PASSWORD=replace-me njt-mcp http
@@ -282,18 +245,6 @@ An upstream body `{"errorMessage":"Daily usage limit:…"}` is returned as a too
 
 If an API returns 401 or 403, or a body that is not the documented JSON, the tool error says the account may lack access. Tools stay listed, because probing every API at startup would spend the login budget. `njt_status` shows the last error per product and does not show secrets.
 
-## Docker
-
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t njt-mcp .
-docker run --rm -p 8092:8092 \
-  -e NJT_USERNAME=replace-me \
-  -e NJT_PASSWORD=replace-me \
-  njt-mcp
-```
-
-The runtime image is `debian:bookworm-slim` plus CA certificates, uid 10001. Inside the container the process listens on `0.0.0.0:8092`. Mount a volume on the cache path if you want tokens to survive container restarts. Give that volume to uid 10001. Client configs that start `njt-mcp stdio` are in [Install as an MCP server](#install-as-an-mcp-server).
-
 ## Tools
 
 | Tool | What it answers |
@@ -341,10 +292,13 @@ Checked against `https://raildata.njtransit.com/swagger/RailData/swagger.json`, 
 ## Development
 
 ```bash
+bash scripts/check-versions.sh
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings -D clippy::missing_docs_in_private_items
 cargo test --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items --locked
+node --test npm/njt-mcp/test/release.test.js
+cargo publish --dry-run --locked
 ```
 
 See `AGENTS.md`. Do not merge or tag from an agent checkout.

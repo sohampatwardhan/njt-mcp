@@ -12,8 +12,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Install protobuf
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Versions match Cargo.toml
+        run: bash scripts/check-versions.sh
       - name: Reject PDFs and tracked secret files
         run: bash .github/scripts/check-repo.sh
       - name: Format
@@ -26,3 +26,12 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items --locked
       - name: Release build
         run: cargo build --release --locked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Check the npm launcher
+        run: |
+          node --check npm/njt-mcp/bin/njt-mcp.js
+          node --test npm/njt-mcp/test/release.test.js
+      - name: cargo publish dry run
+        run: cargo publish --dry-run --locked

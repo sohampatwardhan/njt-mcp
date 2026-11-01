@@ -7,7 +7,9 @@ This repository is an MCP server for NJ Transit. Treat the upstream APIs as mete
 - NJ Transit usernames, passwords, tokens, `state.json`, or cache directories.
 - Captured NJ Transit responses, GTFS zips downloaded from NJ Transit, or protobuf dumps.
 - The NJ Transit API PDFs, or prose copied from them. Behavior belongs in code and short original docs.
-- Tests use the synthetic fixtures in `src/fixtures.rs` and `tests/support.rs` only.
+- Tests use the synthetic fixtures in `src/fixtures.rs` and `tests/common/support.rs` only.
+- Do not call live NJ Transit APIs from CI or tests.
+- Do not add a Dockerfile or document a container image. Releases are binaries, crates.io, and one npm package.
 
 ## Rate limits
 
@@ -19,12 +21,16 @@ This repository is an MCP server for NJ Transit. Treat the upstream APIs as mete
 
 ## Pull requests
 
-- Agents never merge, tag, or publish this repository. Open a pull request and stop.
+- Agents never merge, tag, or publish this repository. Open a pull request and stop. Do not push `v*` tags.
+- `Cargo.toml` and `npm/njt-mcp/package.json` must stay on the same version. `scripts/check-versions.sh` enforces that.
 - Before opening a pull request, from a clean tree, run:
+  - `bash scripts/check-versions.sh`
   - `cargo fmt --check`
   - `cargo clippy --locked --all-targets -- -D warnings -D clippy::missing_docs_in_private_items`
   - `cargo test --locked`
   - `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items --locked`
+  - `node --test npm/njt-mcp/test/release.test.js`
+  - `cargo publish --dry-run --locked`
 
 ## Documentation
 
